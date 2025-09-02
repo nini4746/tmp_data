@@ -136,16 +136,16 @@ y_te = le.transform(y_te_raw)
 # 4) 모델 정의/학습 (MLP)
 # -------------------------------
 mlp = MLPClassifier(
-    hidden_layer_sizes=(256, 128),
+    hidden_layer_sizes=(512, 256, 128),   # 구조 변경
     activation="relu",
     solver="adam",
-    alpha=1e-4,
+    alpha=5e-4,                           # 규제 약간 증가
     batch_size=128,
     learning_rate_init=1e-3,
-    max_iter=250,
+    max_iter=300,                          # 학습 최대 반복 증가
     early_stopping=True,
     validation_fraction=0.15,
-    n_iter_no_change=15,
+    n_iter_no_change=20,                   # patience 증가
     random_state=RANDOM_STATE,
     verbose=False
 )
