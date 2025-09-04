@@ -21,7 +21,7 @@ from torch.utils.data import TensorDataset, DataLoader
 # -------------------------------
 # 0) 설정
 # -------------------------------
-CSV_PATH = "training_data2.csv"
+CSV_PATH = "29point.csv"
 LABEL_COL = "Position"
 MAG_COLS = ["Mag_X", "Mag_Y", "Mag_Z"]
 ORI_COLS = ["Ori_X", "Ori_Y", "Ori_Z"]
@@ -29,7 +29,7 @@ TEST_SIZE = 0.2
 RANDOM_STATE = 42
 STANDARDIZE = True
 BATCH_SIZE = 128
-EPOCHS = 100
+EPOCHS = 200
 LR = 1e-3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -113,13 +113,15 @@ test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 # 4) 모델 정의
 # -------------------------------
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_sizes, output_dim):
+    def __init__(self, input_dim, hidden_sizes, output_dim, dropout=0.3):
         super().__init__()
         layers = []
         prev_dim = input_dim
         for h in hidden_sizes:
             layers.append(nn.Linear(prev_dim, h))
+            layers.append(nn.BatchNorm1d(h))
             layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
             prev_dim = h
         layers.append(nn.Linear(prev_dim, output_dim))
         self.net = nn.Sequential(*layers)
@@ -129,16 +131,22 @@ class MLP(nn.Module):
 
 input_dim = X_tr.shape[1]
 output_dim = len(le.classes_)
-model = MLP(input_dim, [512, 256, 128], output_dim).to(DEVICE)
+model = MLP(input_dim, [1024, 512, 256, 128], output_dim).to(DEVICE)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=LR)
+optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5, verbose=True)
 
 # -------------------------------
 # 5) 학습 루프
 # -------------------------------
 print("🚀 Training PyTorch MLP ...")
 train_losses, test_losses = [], []
+
+best_loss = float('inf')
+best_model_state = None
+early_stop_patience = 15
+early_stop_counter = 0
 
 for epoch in range(1, EPOCHS+1):
     model.train()
@@ -160,10 +168,28 @@ for epoch in range(1, EPOCHS+1):
         preds = model(X_te_t.to(DEVICE))
         loss_te = criterion(preds, y_te_t.to(DEVICE)).item()
         test_losses.append(loss_te)
+
+    scheduler.step(loss_te)
+
+    if loss_te < best_loss:
+        best_loss = loss_te
+        best_model_state = model.state_dict()
+        early_stop_counter = 0
+    else:
+        early_stop_counter += 1
+
     if epoch % 10 == 0 or epoch == 1:
         print(f"Epoch {epoch}/{EPOCHS} | Train Loss: {avg_loss:.4f} | Test Loss: {loss_te:.4f}")
 
+    if early_stop_counter >= early_stop_patience:
+        print(f"⏹ Early stopping at epoch {epoch} due to no improvement in validation loss for {early_stop_patience} epochs.")
+        break
+
 print("✅ Training done.")
+
+# Load best model state
+if best_model_state is not None:
+    model.load_state_dict(best_model_state)
 
 # -------------------------------
 # 6) 평가
